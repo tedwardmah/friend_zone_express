@@ -20,6 +20,22 @@ var FZsettings = {
     backupPlaylistId: '0NpOn7HwkFgvDz7G7c0FTU' //August the first
 };
 
+var bookshelf = require('../config/bookshelf');
+
+var Playlist = bookshelf.Model.extend({
+  tableName: 'playlists',
+  songs: function() {
+    return this.hasMany(Song);
+  }
+});
+
+var Song = bookshelf.Model.extend({
+  tableName: 'songs',
+  playlist: function() {
+    return this.belongsTo(Playlist);
+  }
+});
+
 /* GET friendzone listing. */
 router.get('/', function(req, res, next) {
     access_token = req.query.access_token;
@@ -41,8 +57,11 @@ router.get('/playlists', function(req, res, next) {
 
     request.get(playlistsOptions, function(error, response, body) {
         if (!error && response.statusCode === 200) {
-            res.json({
-                body: body
+            var playlists = Playlist.fetchAll().then(function(collection){
+                new Playlist({spotify_uri: body.items[0].id, snapshot_id: body.items[0].snapshot_id}).save();
+                res.json({
+                    body: body
+                });
             });
         }
     });
