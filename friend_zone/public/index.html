@@ -151,14 +151,20 @@
           }, false);
           document.getElementById('obtain-playlists').addEventListener('click', function(){
             $.ajax({
-              url: '/friendzone/playlists'
+              url: '/friendzone/playlists',
+              data: {
+                access_token: access_token
+              }
             }).done(function(data){
               console.dir(data);
             })
           }, false);
           document.getElementById('obtain-friend-zone').addEventListener('click', function(){
             $.ajax({
-              url: '/friendzone'
+              url: '/friendzone',
+              data: {
+                access_token: access_token
+              }
             }).done(function(data){
               debugger
               console.dir(data);
@@ -166,14 +172,20 @@
           }, false);
           document.getElementById('empty-friend-zone').addEventListener('click', function(){
             $.ajax({
-              url: '/friendzone/empty'
+              url: '/friendzone/empty',
+              data: {
+                access_token: access_token
+              }              
             }).done(function(data){
               console.dir(data);
             })
           }, false);          
           document.getElementById('prune-friend-zone').addEventListener('click', function(){
             $.ajax({
-              url: '/friendzone/prune'
+              url: '/friendzone/prune',
+              data: {
+                access_token: access_token
+              }              
             }).done(function(data){
               debugger
               console.dir(data);
@@ -181,6 +193,6 @@
           }, false);
         }
       })();
-    </script>
+</script>
 </html>
 

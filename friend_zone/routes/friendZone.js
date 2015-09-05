@@ -1,34 +1,56 @@
 var express = require('express');
 var router = express.Router();
 
+var request = require('request'); // "Request" library
+var when = require('when');
+var querystring = require('querystring');
+var cookieParser = require('cookie-parser');
+var moment = require('moment');
+moment.utc().format();
+
+var client_id = process.env.FRIEND_ZONE_CLIENT_ID; // Your client id
+var client_secret = process.env.FRIEND_ZONE_CLIENT_SECRET; // Your client secret
+var redirect_uri = 'http://localhost:3000/callback'; // Your redirect uri
+var userId = '1263219154'; //spotify:user:1263219154
+var stored_access_token = null;
+var FZsettings = {
+    friendZoneMasterPlaylistId: '0WSVlLsBh8zDHARsTqSoXW',
+    fzAugustMasterBackup: '7F8BlhTzhRUfZf3saBKc58',
+    friendZoneRadioId: '73k1L1bpCRqbbUAltTRMp4', //FKA FZ August
+    backupPlaylistId: '0NpOn7HwkFgvDz7G7c0FTU' //August the first
+};
+
 /* GET friendzone listing. */
 router.get('/', function(req, res, next) {
+    access_token = req.query.access_token;
     var sendResponse = function sendResponse(playlistURIs) {
-        res.send({
+        res.json({
             message: 'You in the ZONE now boiiii',
-            // responses: playlistURIs,
-            // totalTracks: totalTracks,
-            // addedTracks: totalAddedTracks
+            stored_access_token: stored_access_token
+                // responses: playlistURIs,
+                // totalTracks: totalTracks,
+                // addedTracks: totalAddedTracks
         });
     };
     // getPlaylistsTracks(getPlaylistURIs(), [], getPlaylistsTracks, sendResponse);
 });
 
-router.get('/playlists', function(req, res) {
-    var access_token = stored_access_token;
-    var playlistsOptions = apiOptions.getAllUserPlaylists();
+router.get('/playlists', function(req, res, next) {
+    var access_token = req.query.access_token;
+    var playlistsOptions = apiOptions.getAllUserPlaylists(req.query.access_token);
 
     request.get(playlistsOptions, function(error, response, body) {
         if (!error && response.statusCode === 200) {
-            res.send({
-                response: response,
+            res.json({
                 body: body
             });
         }
     });
 });
 
-router.get('/empty', function(req, res) {
+router.get('/empty', function(req, res, next) {
+    stored_access_token = req.query.refresh_token;
+    var access_token = req.query.access_token;
     var playlistToEmptyId = FZsettings.friendZoneMasterPlaylistId;
 
     var emptyOptions = apiOptions.getPlaylistTracks(playlistToEmptyId);
@@ -46,7 +68,7 @@ router.get('/empty', function(req, res) {
                 tracks: trackIds
             };
             request.del(emptyOptions, function(error2, response2, body2) {
-                res.send({
+                res.json({
                     body: body2
                 });
             });
@@ -55,12 +77,14 @@ router.get('/empty', function(req, res) {
     });
 });
 
-router.get('/prune', function(req, res) {
+router.get('/prune', function(req, res, next) {
+    stored_access_token = req.query.refresh_token;
+    var access_token = req.query.access_token;
     var playlistToPrune = FZsettings.friendZoneRadioId;
     // var playlistToPrune = '73k1L1bpCRqbbUAltTRMp4'; //FriendZone August
     var backupPlaylistId = FZsettings.backupPlaylistId;
     var sendResponse = function(data) {
-        res.send({
+        res.json({
             message: 'saul goode bro!',
             data: data
         });
@@ -98,12 +122,12 @@ var apiOptions = {
             json: true
         };
     },
-    getAllUserPlaylists: function() {
-        var access_token = stored_access_token;
+    getAllUserPlaylists: function(access_token) {
+        var accessToken = access_token ? access_token : stored_access_token;
         return {
             url: 'https://api.spotify.com/v1/users/' + userId + '/playlists?limit=50',
             headers: {
-                'Authorization': 'Bearer ' + access_token
+                'Authorization': 'Bearer ' + accessToken
             },
             json: true
         };
@@ -180,7 +204,7 @@ var addToBackUp = function(playlistURI, backupPlaylistURI, tracksToAddArray, sen
 var removeFromFriendZoneRadio = function(playlistURI, backupPlaylistURI, tracksToAddArray, sendResponseCallback) {
     var playlistToEmptyId = playlistURI;
 
-    var formattedArray = function () { //TODO move this declaration outside of the function, need to pass an array in and return an array
+    var formattedArray = function() { //TODO move this declaration outside of the function, need to pass an array in and return an array
         var returnArray = [];
         for (var u = 0; u < tracksToAddArray.length; u++) {
             returnArray.push({
