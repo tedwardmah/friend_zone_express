@@ -12,10 +12,11 @@ var client_id = process.env.FRIEND_ZONE_CLIENT_ID; // Your client id
 var client_secret = process.env.FRIEND_ZONE_CLIENT_SECRET; // Your client secret
 var redirect_uri = 'http://localhost:3000/callback'; // Your redirect uri
 var userId = '1263219154'; //spotify:user:1263219154
-var stored_access_token = null;
+var stored_access_token = null; //TODO pass access_token?
 var FZsettings = {
+    debuggerPlaylist: '3xK9wu5wet6fyy0I9mAk77',
     friendZoneMasterPlaylistId: '0WSVlLsBh8zDHARsTqSoXW',
-    fzAugustMasterBackup: '7F8BlhTzhRUfZf3saBKc58',
+    fzAugustMasterBackup: '7F8BlhTzhRUfZf3saBKc58', 
     friendZoneRadioId: '73k1L1bpCRqbbUAltTRMp4', //FKA FZ August
     backupPlaylistId: '0NpOn7HwkFgvDz7G7c0FTU' //August the first
 };
@@ -49,26 +50,21 @@ router.get('/', function(req, res, next) {
         });
     };
     // getPlaylistsTracks(getPlaylistURIs(), [], getPlaylistsTracks, sendResponse);
+    playlistURIs = getPlaylistURIs();
 });
 
 router.get('/playlists', function(req, res, next) {
     var access_token = req.query.access_token;
     var playlistsOptions = apiOptions.getAllUserPlaylists(req.query.access_token);
-
-    request.get(playlistsOptions, function(error, response, body) {
-        if (!error && response.statusCode === 200) {
-            var playlists = Playlist.fetchAll().then(function(collection){
-                new Playlist({spotify_uri: body.items[0].id, snapshot_id: body.items[0].snapshot_id}).save();
-                res.json({
-                    body: body
-                });
-            });
-        }
+    var playlists = Playlist.fetchAll().then(function(collection){
+        res.json({
+            playlistsCollection: collection
+        });
     });
 });
 
 router.get('/empty', function(req, res, next) {
-    stored_access_token = req.query.refresh_token;
+    stored_access_token = req.query.access_token;
     var access_token = req.query.access_token;
     var playlistToEmptyId = FZsettings.friendZoneMasterPlaylistId;
 
@@ -99,7 +95,7 @@ router.get('/empty', function(req, res, next) {
 router.get('/prune', function(req, res, next) {
     stored_access_token = req.query.refresh_token;
     var access_token = req.query.access_token;
-    var playlistToPrune = FZsettings.friendZoneRadioId;
+    var playlistToPrune = FZsettings.debuggerPlaylist;
     // var playlistToPrune = '73k1L1bpCRqbbUAltTRMp4'; //FriendZone August
     var backupPlaylistId = FZsettings.backupPlaylistId;
     var sendResponse = function(data) {
@@ -112,11 +108,20 @@ router.get('/prune', function(req, res, next) {
     sortFriendZoneRadio(playlistToPrune, backupPlaylistId, sendResponse);
 });
 
-
-
 module.exports = router;
 
 var apiOptions = {
+    getPlaylistInfo: function(playlistId, optionalQuery) {
+        var access_token = stored_access_token;
+        var query = optionalQuery ? ('?fields=' + optionalQuery) : '';
+        return {
+            url: 'https://api.spotify.com/v1/users/' + userId + '/playlists/' + playlistId + query,
+            headers: {
+                'Authorization': 'Bearer ' + access_token
+            },
+            json: true
+        };
+    },
     getPlaylistTracks: function(playlistId, optionalQuery) {
         var access_token = stored_access_token;
         var query = optionalQuery ? ('?fields=' + optionalQuery) : '';
@@ -168,8 +173,8 @@ var apiOptions = {
 
 var getPlaylistURIs = function getPlaylistURIs() {
     var playlists = {
-        // march: '3Bx4pYALhO3uz7xpyPCFog', //spotify:user:1263219154:playlist:3Bx4pYALhO3uz7xpyPCFog
-        // april: '4ZxRnNoRY6kfde6ObumcIJ', //spotify:user:1263219154:playlist:4ZxRnNoRY6kfde6ObumcIJ
+        march: '3Bx4pYALhO3uz7xpyPCFog', //spotify:user:1263219154:playlist:3Bx4pYALhO3uz7xpyPCFog
+        april: '4ZxRnNoRY6kfde6ObumcIJ', //spotify:user:1263219154:playlist:4ZxRnNoRY6kfde6ObumcIJ
         // may: '0WXmnDBQlFwnOomrZKcxvi', //spotify:user:1263219154:playlist:0WXmnDBQlFwnOomrZKcxvi
         // june: '5TtSuNT4VzUC891uNF6WEM', //spotify:user:1263219154:playlist:5TtSuNT4VzUC891uNF6WEM
         // july: '745orEm9Fk4NPldihQuPYy', //spotify:user:1263219154:playlist:745orEm9Fk4NPldihQuPYy
@@ -284,3 +289,100 @@ var addPlaylistsTracksToMaster = function addPlaylistsTracksToMaster(tracksToAdd
         sendResponseCallback();
     }
 };
+
+var getPlaylistTracks = function getPlaylist(playlistId) {
+    var d = when.defer();
+    request.get(apiOptions.getPlaylistTracks(playlistId), function(error, response, body) {
+        if (!error) {
+            d.resolve(body);
+        } else {
+            d.resolve({
+                error: error,
+                body: body
+            });
+        }
+    });
+    return d.promise;
+};
+
+var getPlaylistInfo = function getPlaylistInfo(playlistId) {
+    var d = when.defer();
+    request.get(apiOptions.getPlaylistInfo(playlistId), function(error, response, body) {
+        if (!error) {
+            d.resolve(body);
+        } else {
+            d.resolve({
+                error: error,
+                body: body
+            });
+        }
+    });
+    return d.promise;
+};
+
+var getPlaylistInfoAndTracks = function getPlaylistInfoAndTracks(playlistId) {
+    var d = when.defer();
+    when.all([
+            getPlaylistInfo(playlistId),
+            getPlaylistTracks(playlistId)
+        ]).then(function(returnValues){
+            d.resolve({
+                playlistInfo: returnValues[0],
+                trackInfo: returnValues[1]
+            });
+        });
+    return d.promise;
+};
+
+router.get('/writeDB', function(req, res) {
+    stored_access_token = req.query.access_token;   
+    var playlistURIs = getPlaylistURIs();
+
+    var playlistSVCPromises = [];
+    for (var i=0; i<playlistURIs.length; i++){
+        playlistSVCPromise = getPlaylistInfo( playlistURIs[i] );
+        playlistSVCPromises.push( playlistSVCPromise );
+    }
+
+    when.all(playlistSVCPromises).then( function(serviceResponses) {
+            var spotifyPlaylistInfo = [];
+            var playlistDbEntryPromises = [];
+            for (var i=0; i< serviceResponses.length;i++) {
+                spotifyPlaylistInfo.push({
+                    spotify_uri: serviceResponses[i].id,
+                    snapshot_id: serviceResponses[i].snapshot_id,
+                    spotify_owner_id: serviceResponses[i].owner.id
+                });
+                playlistDbEntryPromises.push( new Playlist({
+                    spotify_uri: serviceResponses[i].id,
+                    snapshot_id: serviceResponses[i].snapshot_id,
+                    spotify_owner_id: serviceResponses[i].owner.id
+                }).save() );
+                // new Playlist({spotify_uri: body.items[0].id, snapshot_id: body.items[0].snapshot_id}).save();
+            }
+            when.all(playlistDbEntryPromises).then( function(dbEntries) { 
+                Playlist.fetchAll().then(function(collection){
+                    res.send({
+                        message: 'You in the ZONE now boiiii',
+                        response: {
+                            spotifyPlaylistInfo: spotifyPlaylistInfo,
+                            dbPlaylistInfo: collection
+                        }
+                    });
+                });
+
+            }, function(error){
+                res.send({
+                    message: 'Something went wrong...fear not',
+                    response: error
+                });
+            });
+        },
+        function(error) {
+            res.send({
+                message: 'Something went wrong...fear not',
+                response: error
+            });
+        }
+    );
+});

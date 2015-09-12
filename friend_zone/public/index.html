@@ -31,7 +31,10 @@
         <button class="btn btn-default" id="obtain-new-token">Obtain new token using the refresh token</button>
       </div>
       <div>
-        <button class="btn btn-default" id="obtain-playlists">All User Playlists</button>
+        <button class="btn btn-default" id="write-to-db">Make DB Playlists</button>
+      </div>     
+      <div>
+        <button class="btn btn-default" id="obtain-playlists">All DB Playlists</button>
       </div>
       <div>
         <button class="btn btn-default" id="prune-friend-zone">Prune Playlist (last 30 days will be maintained)</button>
@@ -186,6 +189,17 @@
               data: {
                 access_token: access_token
               }              
+            }).done(function(data){
+              debugger
+              console.dir(data);
+            })
+          }, false);
+          document.getElementById('write-to-db').addEventListener('click', function(){
+            $.ajax({
+              url: '/friendzone/writeDB',
+              data: {
+                access_token: access_token
+              }
             }).done(function(data){
               debugger
               console.dir(data);
