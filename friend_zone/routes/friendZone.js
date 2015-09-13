@@ -445,3 +445,17 @@ router.get('/writeDB', function(req, res) {
     });
 
 });
+
+router.get('/songs', function(req, res, next) {
+    var access_token = req.query.access_token;
+    Song.fetchAll({
+        withRelated: ['playlist']
+    }).
+    then(function(allSongsCollection){
+        var firstSongId = allSongsCollection.first().id;
+        res.json({
+            message: 'saul goode bro!',
+            firstSongId: firstSongId
+        });
+    })
+});

@@ -34,6 +34,9 @@
         <button class="btn btn-default" id="write-to-db">Make DB Playlists</button>
       </div>     
       <div>
+        <button class="btn btn-default" id="obtain-songs">Get Songs from first DB Playlist</button>
+      </div>
+      <div>
         <button class="btn btn-default" id="obtain-playlists">All DB Playlists</button>
       </div>
       <div>
@@ -109,6 +112,7 @@
         var access_token = params.access_token,
             refresh_token = params.refresh_token,
             error = params.error;
+        
 
         if (error) {
           alert('There was an error during the authentication');
@@ -155,6 +159,16 @@
           document.getElementById('obtain-playlists').addEventListener('click', function(){
             $.ajax({
               url: '/friendzone/playlists',
+              data: {
+                access_token: access_token
+              }
+            }).done(function(data){
+              console.dir(data);
+            })
+          }, false);
+          document.getElementById('obtain-songs').addEventListener('click', function(){
+            $.ajax({
+              url: '/friendzone/songs',
               data: {
                 access_token: access_token
               }
