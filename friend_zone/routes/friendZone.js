@@ -334,88 +334,42 @@ var getPlaylistInfoAndTracks = function getPlaylistInfoAndTracks(playlistId) {
     return d.promise;
 };
 
-
-var addPlaylistsToDb = function addPlaylistsToDb(playlistSVCPromises, svcResponses) {
-    var d = when.defer();
-    when.all(playlistSVCPromises).then( function(serviceResponses) {
-        svcResponses = serviceResponses;
-        var playlistDbEntryPromises = [];
-        playlistDbEntryPromises.push({
-            serviceResponses: serviceResponses
-        });
-        for (var i=0; i< serviceResponses.length;i++) {
-            playlistDbEntryPromises.push( new Playlist({
-                spotify_uri: serviceResponses[i].id,
-                snapshot_id: serviceResponses[i].snapshot_id,
-                spotify_owner_id: serviceResponses[i].owner.id
-            }).save() );
-            // new Playlist({spotify_uri: body.items[0].id, snapshot_id: body.items[0].snapshot_id}).save();
-        }
-        d.resolve({
-            playlistDbEntryPromises: playlistDbEntryPromises,
-            svcResponses: svcResponses
-        });
-    },
-    function(error){
-        d.resolve(error);
-    });
-
-    return d.promise;
-};
-
-var addTracksToDbPlaylist = function addTracksToDbPlaylist(dbPlaylist, tracks) {
+var makeBookshelfPlaylistTransaction = function makeBookshelfPlaylistTransaction(serviceResponse, songInfoArray) {
     var d = when.defer();
 
-    var tracksDbEntryPromises = [];
-    for (var i=0; i<tracks.length; i++){
-        tracksDbEntryPromises.push( new Song({
-            playlist_id:  dbPlaylist.id,
-            spotify_uri: tracks[i].track.uri,
-            added_by_uri: tracks[i].added_by.id,
-            added_on: tracks[i].added_at
-        }).save() );
-    }
-    when.all(tracksDbEntryPromises).then(function(dbEntries){
-        d.resolve(dbEntries);
-    })
-    return d.promise;
-};
-
-var addTracksToDb = function addTracksToDb(playlistDbEntryPromises) {
-    var d = when.defer();
-
-    when.all(playlistDbEntryPromises).then( function(dbEntries){ 
-        var addedTracks = [];
-        var spotifyPlaylist;
-        var dbPlaylist;
-        var tracks;
-        var findDBPlaylistBySpotifyURI = function(spotify_uri) {
-            return dbEntries.filter( function(el, idx, array) { 
-                if (el.attributes){
-                    return el.attributes.spotify_uri === spotify_uri; 
-                } else {
-                    return false
-                }
-            })[0] ;
-        };
-        
-        var playlistsAdded = [];
-        for (var i=0; i < dbEntries[0].serviceResponses.length; i++) {  //TODO: this is where you ended on saturday night
-            spotifyPlaylist = dbEntries[0].serviceResponses[i];
-            dbPlaylist = findDBPlaylistBySpotifyURI(spotifyPlaylist.id);
-            // dbPlaylist = dbEntries[i+1];
-            tracks = spotifyPlaylist.tracks.items;
-            playlistsAdded.push( addTracksToDbPlaylist(dbPlaylist, tracks) ) ;
-        }
-        when.all(playlistsAdded).then(function(playlistsAdded){
-            d.resolve(playlistsAdded);
+    bookshelf.transaction(function(t) {
+      return new Playlist({
+            spotify_uri: serviceResponse.id,
+            snapshot_id: serviceResponse.snapshot_id,
+            spotify_owner_id: serviceResponse.owner.id
         })
-    },
-    function(error) { 
-        d.resolve(error);
+        .save(null, {transacting: t})
+        .tap(function(model) {
+          return when.map(songInfoArray, function(info) {
+            return new Song(info).save({'playlist_id': model.id}, {transacting: t});
+          });
+        });
+    }).then(function(library) {
+        d.resolve(library);
+    }).catch(function(err) {
+      console.error(err);
     });
 
-    return d.promise;
+
+    return d.promise
+};
+
+var constructSongInfoArray = function constructSongInfoArray(serviceResponse){
+    var songInfoArray = [];
+    var songs = serviceResponse.tracks.items;
+    for (var i=0;i<songs.length; i++) {
+        songInfoArray.push({
+            spotify_uri: songs[i].track.uri,
+            added_by_uri: songs[i].added_by.id,
+            added_on: songs[i].added_at
+        })
+    }
+    return songInfoArray;
 };
 
 router.get('/writeDB', function(req, res) {
@@ -427,35 +381,40 @@ router.get('/writeDB', function(req, res) {
         playlistSVCPromise = getPlaylistInfo( playlistURIs[i] );
         playlistSVCPromises.push( playlistSVCPromise );
     }
-    addPlaylistsToDb(playlistSVCPromises, svcResponses).then(function(data){
-        var playlistDbEntryPromises = data.playlistDbEntryPromises;
-        var svcResponses = data.svcResponses;
 
-        addTracksToDb(playlistDbEntryPromises).then( function(data){
-            Playlist.fetchAll().then(function(collection){
+    when.all(playlistSVCPromises).then( function(serviceResponses) {
+        var librariesReady = [];
+        for (var i=0;i<serviceResponses.length;i++){
+            librariesReady.push( makeBookshelfPlaylistTransaction( serviceResponses[i], constructSongInfoArray(serviceResponses[i]) ) );
+        }
+        when.all(librariesReady).then(function(libraries){
                 res.send({
                     message: 'You in the ZONE now boiiii',
                     response: {
-                        // spotifyPlaylistInfo: spotifyPlaylistInfo,
-                        dbPlaylistInfo: collection
+                        dbPlaylistInfo: libraries
                     }
                 });
-            });
-        });
-    });
+        })
 
+    },
+    function(error){
+        d.resolve(error);
+    });
 });
 
 router.get('/songs', function(req, res, next) {
     var access_token = req.query.access_token;
-    Song.fetchAll({
-        withRelated: ['playlist']
+    Playlist.fetchAll({
+        withRelated: ['songs']
     }).
     then(function(allSongsCollection){
         var firstSongId = allSongsCollection.first().id;
+
         res.json({
             message: 'saul goode bro!',
-            firstSongId: firstSongId
+            firstSongId: firstSongId,
+            allSongsCollection: allSongsCollection
         });
+        // console.log(library.related('books').pluck('title'));
     })
 });
