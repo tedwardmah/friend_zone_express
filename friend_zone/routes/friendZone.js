@@ -334,55 +334,114 @@ var getPlaylistInfoAndTracks = function getPlaylistInfoAndTracks(playlistId) {
     return d.promise;
 };
 
+
+var addPlaylistsToDb = function addPlaylistsToDb(playlistSVCPromises, svcResponses) {
+    var d = when.defer();
+    when.all(playlistSVCPromises).then( function(serviceResponses) {
+        svcResponses = serviceResponses;
+        var playlistDbEntryPromises = [];
+        playlistDbEntryPromises.push({
+            serviceResponses: serviceResponses
+        });
+        for (var i=0; i< serviceResponses.length;i++) {
+            playlistDbEntryPromises.push( new Playlist({
+                spotify_uri: serviceResponses[i].id,
+                snapshot_id: serviceResponses[i].snapshot_id,
+                spotify_owner_id: serviceResponses[i].owner.id
+            }).save() );
+            // new Playlist({spotify_uri: body.items[0].id, snapshot_id: body.items[0].snapshot_id}).save();
+        }
+        d.resolve({
+            playlistDbEntryPromises: playlistDbEntryPromises,
+            svcResponses: svcResponses
+        });
+    },
+    function(error){
+        d.resolve(error);
+    });
+
+    return d.promise;
+};
+
+var addTracksToDbPlaylist = function addTracksToDbPlaylist(dbPlaylist, tracks) {
+    var d = when.defer();
+
+    var tracksDbEntryPromises = [];
+    for (var i=0; i<tracks.length; i++){
+        tracksDbEntryPromises.push( new Song({
+            playlist_id:  dbPlaylist.id,
+            spotify_uri: tracks[i].track.uri,
+            added_by_uri: tracks[i].added_by.id,
+            added_on: tracks[i].added_at
+        }).save() );
+    }
+    when.all(tracksDbEntryPromises).then(function(dbEntries){
+        d.resolve(dbEntries);
+    })
+    return d.promise;
+};
+
+var addTracksToDb = function addTracksToDb(playlistDbEntryPromises) {
+    var d = when.defer();
+
+    when.all(playlistDbEntryPromises).then( function(dbEntries){ 
+        var addedTracks = [];
+        var spotifyPlaylist;
+        var dbPlaylist;
+        var tracks;
+        var findDBPlaylistBySpotifyURI = function(spotify_uri) {
+            return dbEntries.filter( function(el, idx, array) { 
+                if (el.attributes){
+                    return el.attributes.spotify_uri === spotify_uri; 
+                } else {
+                    return false
+                }
+            })[0] ;
+        };
+        
+        var playlistsAdded = [];
+        for (var i=0; i < dbEntries[0].serviceResponses.length; i++) {  //TODO: this is where you ended on saturday night
+            spotifyPlaylist = dbEntries[0].serviceResponses[i];
+            dbPlaylist = findDBPlaylistBySpotifyURI(spotifyPlaylist.id);
+            // dbPlaylist = dbEntries[i+1];
+            tracks = spotifyPlaylist.tracks.items;
+            playlistsAdded.push( addTracksToDbPlaylist(dbPlaylist, tracks) ) ;
+        }
+        when.all(playlistsAdded).then(function(playlistsAdded){
+            d.resolve(playlistsAdded);
+        })
+    },
+    function(error) { 
+        d.resolve(error);
+    });
+
+    return d.promise;
+};
+
 router.get('/writeDB', function(req, res) {
     stored_access_token = req.query.access_token;   
     var playlistURIs = getPlaylistURIs();
-
+    var svcResponses;
     var playlistSVCPromises = [];
     for (var i=0; i<playlistURIs.length; i++){
         playlistSVCPromise = getPlaylistInfo( playlistURIs[i] );
         playlistSVCPromises.push( playlistSVCPromise );
     }
+    addPlaylistsToDb(playlistSVCPromises, svcResponses).then(function(data){
+        var playlistDbEntryPromises = data.playlistDbEntryPromises;
+        var svcResponses = data.svcResponses;
 
-    when.all(playlistSVCPromises).then( function(serviceResponses) {
-            var spotifyPlaylistInfo = [];
-            var playlistDbEntryPromises = [];
-            for (var i=0; i< serviceResponses.length;i++) {
-                spotifyPlaylistInfo.push({
-                    spotify_uri: serviceResponses[i].id,
-                    snapshot_id: serviceResponses[i].snapshot_id,
-                    spotify_owner_id: serviceResponses[i].owner.id
-                });
-                playlistDbEntryPromises.push( new Playlist({
-                    spotify_uri: serviceResponses[i].id,
-                    snapshot_id: serviceResponses[i].snapshot_id,
-                    spotify_owner_id: serviceResponses[i].owner.id
-                }).save() );
-                // new Playlist({spotify_uri: body.items[0].id, snapshot_id: body.items[0].snapshot_id}).save();
-            }
-            when.all(playlistDbEntryPromises).then( function(dbEntries) { 
-                Playlist.fetchAll().then(function(collection){
-                    res.send({
-                        message: 'You in the ZONE now boiiii',
-                        response: {
-                            spotifyPlaylistInfo: spotifyPlaylistInfo,
-                            dbPlaylistInfo: collection
-                        }
-                    });
-                });
-
-            }, function(error){
+        addTracksToDb(playlistDbEntryPromises).then( function(data){
+            Playlist.fetchAll().then(function(collection){
                 res.send({
-                    message: 'Something went wrong...fear not',
-                    response: error
+                    message: 'You in the ZONE now boiiii',
+                    response: {
+                        // spotifyPlaylistInfo: spotifyPlaylistInfo,
+                        dbPlaylistInfo: collection
+                    }
                 });
             });
-        },
-        function(error) {
-            res.send({
-                message: 'Something went wrong...fear not',
-                response: error
-            });
-        }
-    );
+        });
+    });
+
 });
