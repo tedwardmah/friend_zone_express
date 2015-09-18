@@ -41,7 +41,7 @@ var Song = bookshelf.Model.extend({
 router.get('/', function(req, res, next) {
     access_token = req.query.access_token;
     var sendResponse = function sendResponse(playlistURIs) {
-        res.json({
+        res.status('200').json({
             message: 'You in the ZONE now boiiii',
             stored_access_token: stored_access_token
                 // responses: playlistURIs,
@@ -57,7 +57,7 @@ router.get('/playlists', function(req, res, next) {
     var access_token = req.query.access_token;
     var playlistsOptions = apiOptions.getAllUserPlaylists(req.query.access_token);
     var playlists = Playlist.fetchAll().then(function(collection){
-        res.json({
+        res.status('200').json({
             playlistsCollection: collection
         });
     });
@@ -83,7 +83,7 @@ router.get('/empty', function(req, res, next) {
                 tracks: trackIds
             };
             request.del(emptyOptions, function(error2, response2, body2) {
-                res.json({
+                res.status('200').json({
                     body: body2
                 });
             });
@@ -175,10 +175,11 @@ var getPlaylistURIs = function getPlaylistURIs() {
     var playlists = {
         march: '3Bx4pYALhO3uz7xpyPCFog', //spotify:user:1263219154:playlist:3Bx4pYALhO3uz7xpyPCFog
         april: '4ZxRnNoRY6kfde6ObumcIJ', //spotify:user:1263219154:playlist:4ZxRnNoRY6kfde6ObumcIJ
-        // may: '0WXmnDBQlFwnOomrZKcxvi', //spotify:user:1263219154:playlist:0WXmnDBQlFwnOomrZKcxvi
-        // june: '5TtSuNT4VzUC891uNF6WEM', //spotify:user:1263219154:playlist:5TtSuNT4VzUC891uNF6WEM
-        // july: '745orEm9Fk4NPldihQuPYy', //spotify:user:1263219154:playlist:745orEm9Fk4NPldihQuPYy
-        // friendZoneRadio: '73k1L1bpCRqbbUAltTRMp4' //spotify:user:1263219154:playlist:73k1L1bpCRqbbUAltTRMp4
+        may: '0WXmnDBQlFwnOomrZKcxvi', //spotify:user:1263219154:playlist:0WXmnDBQlFwnOomrZKcxvi
+        june: '5TtSuNT4VzUC891uNF6WEM', //spotify:user:1263219154:playlist:5TtSuNT4VzUC891uNF6WEM
+        july: '745orEm9Fk4NPldihQuPYy', //spotify:user:1263219154:playlist:745orEm9Fk4NPldihQuPYy
+        august: '7F8BlhTzhRUfZf3saBKc58', //spotify:user:1263219154:playlist:7F8BlhTzhRUfZf3saBKc58
+        friendZoneRadio: '73k1L1bpCRqbbUAltTRMp4' //spotify:user:1263219154:playlist:73k1L1bpCRqbbUAltTRMp4
     };
     var playlistNames = Object.keys(playlists);
     var playlistURIs = [];
@@ -302,6 +303,7 @@ var getPlaylistTracks = function getPlaylist(playlistId) {
             });
         }
     });
+
     return d.promise;
 };
 
@@ -317,6 +319,7 @@ var getPlaylistInfo = function getPlaylistInfo(playlistId) {
             });
         }
     });
+
     return d.promise;
 };
 
@@ -325,12 +328,14 @@ var getPlaylistInfoAndTracks = function getPlaylistInfoAndTracks(playlistId) {
     when.all([
             getPlaylistInfo(playlistId),
             getPlaylistTracks(playlistId)
-        ]).then(function(returnValues){
+        ])
+    .then(function(returnValues){
             d.resolve({
                 playlistInfo: returnValues[0],
                 trackInfo: returnValues[1]
             });
-        });
+    });
+
     return d.promise;
 };
 
@@ -349,14 +354,18 @@ var makeBookshelfPlaylistTransaction = function makeBookshelfPlaylistTransaction
             return new Song(info).save({'playlist_id': model.id}, {transacting: t});
           });
         });
-    }).then(function(library) {
+    })
+    .then(function(library) {
         d.resolve(library);
-    }).catch(function(err) {
-      console.error(err);
+    })
+    .catch(function(err) {
+        d.resolve({
+            message: 'problem saving to db!',
+            error: err
+        });
     });
 
-
-    return d.promise
+    return d.promise;
 };
 
 var constructSongInfoArray = function constructSongInfoArray(serviceResponse){
@@ -367,7 +376,7 @@ var constructSongInfoArray = function constructSongInfoArray(serviceResponse){
             spotify_uri: songs[i].track.uri,
             added_by_uri: songs[i].added_by.id,
             added_on: songs[i].added_at
-        })
+        });
     }
     return songInfoArray;
 };
@@ -382,23 +391,27 @@ router.get('/writeDB', function(req, res) {
         playlistSVCPromises.push( playlistSVCPromise );
     }
 
-    when.all(playlistSVCPromises).then( function(serviceResponses) {
+    when.all(playlistSVCPromises)
+    .then( function(serviceResponses) {
         var librariesReady = [];
         for (var i=0;i<serviceResponses.length;i++){
             librariesReady.push( makeBookshelfPlaylistTransaction( serviceResponses[i], constructSongInfoArray(serviceResponses[i]) ) );
         }
-        when.all(librariesReady).then(function(libraries){
-                res.send({
-                    message: 'You in the ZONE now boiiii',
-                    response: {
-                        dbPlaylistInfo: libraries
-                    }
-                });
-        })
+        when.all(librariesReady)
+        .then( function(libraries){
+            res.status('200').json({
+                message: 'You in the ZONE now boiiii',
+                response: {
+                    dbPlaylistInfo: libraries
+                }
+            });
+        });
 
     },
-    function(error){
-        d.resolve(error);
+    function(serviceError){
+        res.status('200').json({
+            serviceError: serviceError
+        });
     });
 });
 
@@ -406,15 +419,15 @@ router.get('/songs', function(req, res, next) {
     var access_token = req.query.access_token;
     Playlist.fetchAll({
         withRelated: ['songs']
-    }).
-    then(function(allSongsCollection){
+    })
+    .then(function(allSongsCollection){
         var firstSongId = allSongsCollection.first().id;
 
-        res.json({
+        res.status('200').json({
             message: 'saul goode bro!',
             firstSongId: firstSongId,
             allSongsCollection: allSongsCollection
         });
         // console.log(library.related('books').pluck('title'));
-    })
+    });
 });

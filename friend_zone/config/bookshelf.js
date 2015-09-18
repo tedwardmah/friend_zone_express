@@ -6,7 +6,7 @@ var knex = require('knex')({
         // host: '127.0.0.1',
         // user     : 'your_database_user',
         // password : 'your_database_password',
-        database: 'friend_zone'
+        database: 'friend_zone_test'
     }
 });
 module.exports = require('bookshelf')(knex);
