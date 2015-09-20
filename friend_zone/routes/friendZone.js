@@ -18,13 +18,14 @@ var FZsettings = {
     friendZoneMasterPlaylistId: '0WSVlLsBh8zDHARsTqSoXW',
     fzAugustMasterBackup: '7F8BlhTzhRUfZf3saBKc58', 
     friendZoneRadioId: '73k1L1bpCRqbbUAltTRMp4', //FKA FZ August
-    backupPlaylistId: '0NpOn7HwkFgvDz7G7c0FTU' //August the first
+    // backupPlaylistId: '0NpOn7HwkFgvDz7G7c0FTU' //August the first
 };
 
 var bookshelf = require('../config/bookshelf');
 
 var Playlist = bookshelf.Model.extend({
   tableName: 'playlists',
+  hasTimestamps: true,
   songs: function() {
     return this.hasMany(Song);
   }
@@ -32,6 +33,7 @@ var Playlist = bookshelf.Model.extend({
 
 var Song = bookshelf.Model.extend({
   tableName: 'songs',
+  hasTimestamps: true,
   playlist: function() {
     return this.belongsTo(Playlist);
   }
@@ -92,20 +94,114 @@ router.get('/empty', function(req, res, next) {
     });
 });
 
-router.get('/prune', function(req, res, next) {
-    stored_access_token = req.query.refresh_token;
-    var access_token = req.query.access_token;
-    var playlistToPrune = FZsettings.debuggerPlaylist;
-    // var playlistToPrune = '73k1L1bpCRqbbUAltTRMp4'; //FriendZone August
-    var backupPlaylistId = FZsettings.backupPlaylistId;
-    var sendResponse = function(data) {
-        res.json({
-            message: 'saul goode bro!',
-            data: data
-        });
-    };
+var fetchThisMonthAndPreviousArchives = function fetchThisMonthAndPreviousArchives(){
+    var d = when.defer();
+    Playlist.fetchAll({
+        withRelated: ['songs']
+    }).then(function(playlistCollection){
+        d.resolve(playlistCollection);
+    });
 
-    sortFriendZoneRadio(playlistToPrune, backupPlaylistId, sendResponse);
+    return d.promise;
+};
+
+var sortPlaylistTracksByMonth = function sortPlaylistTracksByMonth(playlistObject) {
+    var tracks = playlistObject.tracks.items;
+    var sortedTracks = {};
+
+    var month;
+    for (var i=0;i<tracks.length;i++){
+        month = moment.utc(tracks[i].added_at).month() + '';
+        if (!sortedTracks[month]) {
+            sortedTracks[month] = [tracks[i]];
+        } else {
+            sortedTracks[month].push(tracks[i]);
+        }
+    }
+    return sortedTracks;
+};
+
+var addNewTracksToArchive = function addNewTracksToArchive(dbQuery, pruneTracks) {
+    var d = when.defer();
+    var months = Object.keys(pruneTracks);
+    
+    var trackArchivePromises = [];
+    for (var i = 0; i < months.length; i++) {
+        var radioMonthTracks = pruneTracks[months[i]];
+        var dbMonth = dbQuery.findWhere({month: months[i]});
+        trackArchivePromises.push( archiveMonth( radioMonthTracks, dbMonth) );
+    }
+
+    when.all(trackArchivePromises).then(function(promiseReturns){
+        d.resolve(promiseReturns);
+    });
+
+    return d.promise;
+};
+
+var archiveMonth = function archiveMonth(radioMonthTracks, dbMonth ) {
+    var d = when.defer();
+
+    var tracksToAddArray = [];
+    if (dbMonth) { 
+        var dbTracks = dbMonth.relations.songs.toJSON();
+
+        var findDbTrack = function findDbTrack(spotifyURI){
+            var track;
+            for (var j=0; j<dbTracks.length; j++){
+                if (dbTracks[i].spotify_uri === spotifyURI){
+                    track = dbTracks[i];
+                }
+            }
+            return track;
+        };
+
+        for (var i=0; i < radioMonthTracks.length; i++) {
+            var result = findDbTrack( radioMonthTracks[i].track.uri );
+
+            if ( !result ) {
+                tracksToAddArray.push(radioMonthTracks[i]);
+            }
+        }
+
+        if (tracksToAddArray.length > 0) {
+            // addTracksToPlaylist.then(function(playlistAddResult){
+            //     d.resolve(playlistAddResult);
+            // });
+        } else {
+            d.resolve('nothingToAdd');
+        }
+    } else {
+        tracksToAddArray = radioMonthTracks;
+    }
+
+
+    return d.promise();
+};
+
+router.get('/prune', function(req, res, next) {
+    stored_access_token = req.query.access_token;
+    var access_token = req.query.access_token;
+    var playlistToPrune = FZsettings.friendZoneRadioId;
+    // var playlistToPrune = '73k1L1bpCRqbbUAltTRMp4'; //FriendZone August
+    // 
+    // var backupPlaylistId = FZsettings.backupPlaylistId;
+    // var backupPlaylistId = FZsettings.backupPlaylistId;
+
+    when.all( [fetchThisMonthAndPreviousArchives(), getPlaylistInfo(playlistToPrune) ] )
+    .then(function(promiseArray){
+            var dbQuery = promiseArray[0];
+            var pruneTracks = sortPlaylistTracksByMonth(promiseArray[1]);
+            addNewTracksToArchive(dbQuery, pruneTracks).then(function(newTracksResponse){
+                res.status('200').json({
+                    newTracksResponse: newTracksResponse
+                });
+            });
+            // addNewTracksToDB(dbQuery, pruneTracks).then(function(dbResult){
+            //     // prune(fzTracks);
+            // });
+
+    });
 });
 
 module.exports = router;
@@ -179,6 +275,7 @@ var getPlaylistURIs = function getPlaylistURIs() {
         june: '5TtSuNT4VzUC891uNF6WEM', //spotify:user:1263219154:playlist:5TtSuNT4VzUC891uNF6WEM
         july: '745orEm9Fk4NPldihQuPYy', //spotify:user:1263219154:playlist:745orEm9Fk4NPldihQuPYy
         august: '7F8BlhTzhRUfZf3saBKc58', //spotify:user:1263219154:playlist:7F8BlhTzhRUfZf3saBKc58
+        // august: '0NpOn7HwkFgvDz7G7c0FTU', // spotify:user:1263219154:playlist:0NpOn7HwkFgvDz7G7c0FTU
         friendZoneRadio: '73k1L1bpCRqbbUAltTRMp4' //spotify:user:1263219154:playlist:73k1L1bpCRqbbUAltTRMp4
     };
     var playlistNames = Object.keys(playlists);
@@ -195,8 +292,8 @@ var getCutoffDate = function(daysAgo) {
     return cutoff;
 };
 
-
-var sortFriendZoneRadio = function(playlistURI, backupPlaylistURI, sendResponseCallback) {
+var sortFriendZoneRadio = function(playlistURI, backupPlaylistURI) {
+    var d = when.defer();
     var tracksToAddArray = [];
     request.get(apiOptions.getPlaylistTracks(playlistURI), function(error, response, body) {
         if (!error && response.statusCode === 200) {
@@ -215,9 +312,22 @@ var sortFriendZoneRadio = function(playlistURI, backupPlaylistURI, sendResponseC
                 }
             }
         }
-        // Move items off this playlist into backup playlist //TODO add function to auto-determine the month of the backup playlist
-        addToBackUp(playlistURI, backupPlaylistURI, tracksToAddArray, sendResponseCallback);
+        //// Move items off this playlist into backup playlist //TODO add function to auto-determine the month of the backup playlist
+        
+        // Add song to monthly backup playlist as soon as it's added to friend zone radio
+        // BEFORE WE RUN THE ABOVE SORT BY TIME
+        // When.all('DB query to get last month's and this month's playlist tracks', 'above request').then(function(returnArray){
+        //     returnArray[0] = dbQuery;
+        //     returnArray[1] = fzTracks;
+        //     addNewTracksToDB(dbQuery, fzTracks).then(function(dbResult){
+        //         prune(fzTracks);
+        //     });
+        // })
+        // Need to get list of stored backup playlist data:  User.playlists.where(year && month === )
+
+        d.resolve( addToBackUp(playlistURI, backupPlaylistURI, tracksToAddArray) );
     });
+    return d.promise;
 };
 
 var addToBackUp = function(playlistURI, backupPlaylistURI, tracksToAddArray, sendResponseCallback) { //TODO consolidate these passed options into a single object
@@ -307,7 +417,7 @@ var getPlaylistTracks = function getPlaylist(playlistId) {
     return d.promise;
 };
 
-var getPlaylistInfo = function getPlaylistInfo(playlistId) {
+var getPlaylistInfo = function getPlaylistInfo(playlistId) { 
     var d = when.defer();
     request.get(apiOptions.getPlaylistInfo(playlistId), function(error, response, body) {
         if (!error) {
@@ -341,12 +451,17 @@ var getPlaylistInfoAndTracks = function getPlaylistInfoAndTracks(playlistId) {
 
 var makeBookshelfPlaylistTransaction = function makeBookshelfPlaylistTransaction(serviceResponse, songInfoArray) {
     var d = when.defer();
-
+    var playlistNameInfo = serviceResponse.name.split(' ');
+    playlistNameInfo = playlistNameInfo.length === 3 ? ['FZ', 'Radio', 'false'] : playlistNameInfo;
     bookshelf.transaction(function(t) {
       return new Playlist({
             spotify_uri: serviceResponse.id,
             snapshot_id: serviceResponse.snapshot_id,
-            spotify_owner_id: serviceResponse.owner.id
+            spotify_owner_id: serviceResponse.owner.id,
+            collaboration_name: playlistNameInfo[0],
+            month: moment.months().indexOf(playlistNameInfo[1]) + '',
+            year: '2015',
+            is_archive: playlistNameInfo.length === 3 ? false : true
         })
         .save(null, {transacting: t})
         .tap(function(model) {
