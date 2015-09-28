@@ -129,7 +129,8 @@ var addNewTracksToArchive = function addNewTracksToArchive(dbQuery, pruneTracks)
     for (var i = 0; i < months.length; i++) {
         var radioMonthTracks = pruneTracks[months[i]];
         var dbMonth = dbQuery.findWhere({month: months[i]});
-        trackArchivePromises.push( archiveMonth( radioMonthTracks, dbMonth) );
+        var monthName = months[i];
+        trackArchivePromises.push( archiveMonth( monthName, radioMonthTracks, dbMonth ) );
     }
 
     when.all(trackArchivePromises).then(function(promiseReturns){
@@ -139,7 +140,7 @@ var addNewTracksToArchive = function addNewTracksToArchive(dbQuery, pruneTracks)
     return d.promise;
 };
 
-var archiveMonth = function archiveMonth(radioMonthTracks, dbMonth ) {
+var archiveMonth = function archiveMonth(monthName, radioMonthTracks, dbMonth ) {
     var d = when.defer();
 
     var tracksToAddArray = [];
@@ -149,8 +150,8 @@ var archiveMonth = function archiveMonth(radioMonthTracks, dbMonth ) {
         var findDbTrack = function findDbTrack(spotifyURI){
             var track;
             for (var j=0; j<dbTracks.length; j++){
-                if (dbTracks[i].spotify_uri === spotifyURI){
-                    track = dbTracks[i];
+                if (dbTracks[j].spotify_uri === spotifyURI){
+                    track = dbTracks[j];
                 }
             }
             return track;
@@ -165,18 +166,112 @@ var archiveMonth = function archiveMonth(radioMonthTracks, dbMonth ) {
         }
 
         if (tracksToAddArray.length > 0) {
-            // addTracksToPlaylist.then(function(playlistAddResult){
-            //     d.resolve(playlistAddResult);
-            // });
+            addTracksToDbPlaylist(dbMonth, tracksToAddArray).then(function(dbResponse){
+                d.resolve(dbResponse);
+            });
         } else {
             d.resolve('nothingToAdd');
         }
     } else {
-        tracksToAddArray = radioMonthTracks;
+        createNewDbPlaylistAndTracks(monthName, radioMonthTracks)
+        .then(function(dbResponse){
+            var playlistName = 'FZ ' + moment.months()[monthName];
+
+            request.post(apiOptions.createPlaylist(null, playlistName, false), function(error, response, body) {
+                d.resolve({
+                    error: error,
+                    response: response,
+                    body: body
+                });
+            });
+        });
     }
 
 
-    return d.promise();
+    return d.promise;   
+};
+
+var createPlaylist = function createPlaylist(){};
+
+var addTracksToDbPlaylist = function addTracksToDbPlaylist(dbMonth, tracksToAddArray) {
+    var d = when.defer();
+    bookshelf.transaction(function(t){
+        var tracks = [];
+        var spotifyTrack;
+        for (var i=0; i<tracksToAddArray.length;i++) {
+            spotifyTrack = tracksToAddArray[i];
+            tracks.push({
+                spotify_uri: spotifyTrack.track.uri,
+                added_by_uri: spotifyTrack.added_by.id,
+                added_on: spotifyTrack.added_at,
+                playlist_id: dbMonth.id          
+            });    
+        }
+
+        return when.map(tracks,
+            function (trackInfo){
+                return new Song(trackInfo).save(null, {transacting: t});
+            });
+
+    })
+    .then(function(songInfo){
+        d.resolve(songInfo);
+    })
+    .catch(function(err) {
+        d.resolve({
+            message: 'problem saving to db!',
+            error: err
+        });
+    });
+
+    return d.promise;
+};
+
+var createNewDbPlaylistAndTracks = function createNewDbPlaylist(monthName, radioMonthTracks) {
+    var d = when.defer();
+
+    var currentUserId = '1263219154';
+    var collaborationName = 'FZ';
+    var month = monthName;
+
+
+    // Need to add a flag to reflect whether the playlist exists in spotify yet / has been synced
+    bookshelf.transaction(function(t) {
+        var tracks = [];
+        var spotifyTrack;
+        for (var i=0; i<radioMonthTracks.length;i++) {
+            spotifyTrack = radioMonthTracks[i];
+            tracks.push({
+                spotify_uri: spotifyTrack.track.uri,
+                added_by_uri: spotifyTrack.added_by.id,
+                added_on: spotifyTrack.added_at,
+            });    
+        }
+        return new Playlist({
+            spotify_owner_id: currentUserId,
+            collaboration_name: collaborationName,
+            month: month,
+            year: '2015',
+            is_archive: true
+        })
+        .save(null, {transacting: t})
+        .tap(function(model) {
+          return when.map(tracks, function(info) {
+            return new Song(info).save({'playlist_id': model.id}, {transacting: t});
+          });
+        });
+    })
+    .then(function(transactionResult) {
+        d.resolve(transactionResult);
+    })
+    .catch(function(err) {
+        d.resolve({
+            message: 'problem saving to db!',
+            error: err
+        });
+    });
+
+    return d.promise;
 };
 
 router.get('/prune', function(req, res, next) {
@@ -190,23 +285,36 @@ router.get('/prune', function(req, res, next) {
 
     when.all( [fetchThisMonthAndPreviousArchives(), getPlaylistInfo(playlistToPrune) ] )
     .then(function(promiseArray){
-            var dbQuery = promiseArray[0];
-            var pruneTracks = sortPlaylistTracksByMonth(promiseArray[1]);
-            addNewTracksToArchive(dbQuery, pruneTracks).then(function(newTracksResponse){
-                res.status('200').json({
-                    newTracksResponse: newTracksResponse
-                });
-            });
-            // addNewTracksToDB(dbQuery, pruneTracks).then(function(dbResult){
-            //     // prune(fzTracks);
-            // });
+        var dbQuery = promiseArray[0];
+        var pruneTracks = sortPlaylistTracksByMonth(promiseArray[1]);
+        
+        addNewTracksToArchive(dbQuery, pruneTracks).then(function(newTracksResponse){
 
+            res.status('200').json({
+                newTracksResponse: newTracksResponse
+            });
+
+        });
     });
 });
 
 module.exports = router;
 
 var apiOptions = {
+    createPlaylist: function(access_token, playlistName, isPublic) {
+        var accessToken = access_token ? access_token : stored_access_token;
+        return {
+            url: 'https://api.spotify.com/v1/users/' + userId + '/playlists',
+            headers: {
+                'Authorization': 'Bearer ' + accessToken
+            },
+            body: {
+                name: playlistName,
+                public: isPublic
+            },
+            json: true
+        };
+    },
     getPlaylistInfo: function(playlistId, optionalQuery) {
         var access_token = stored_access_token;
         var query = optionalQuery ? ('?fields=' + optionalQuery) : '';
